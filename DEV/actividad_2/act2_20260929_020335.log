@@ -1,0 +1,201 @@
+[OK] SSH passwordless + sudo NOPASSWD en server1, server2, server3.
+
+========== 7. VERIFICACIÓN ==========
+
+>>> [10.0.10.3] sudo ovs-vsctl show; ip -br addr show | grep gw_vlan
+6f0eb54f-2ce9-4b85-8110-2a5df45533bc
+    Bridge br-int
+        Port gw_vlan100
+            tag: 100
+            Interface gw_vlan100
+                type: internal
+        Port gw_vlan200
+            tag: 200
+            Interface gw_vlan200
+                type: internal
+        Port ens4
+            Interface ens4
+        Port br-int
+            Interface br-int
+                type: internal
+    ovs_version: "2.13.8"
+gw_vlan100       UNKNOWN        192.168.0.1/24 fe80::4c4f:f2ff:fee6:ede5/64 
+gw_vlan200       UNKNOWN        192.168.2.1/24 fe80::2810:ebff:fe5a:3071/64 
+
+>>> [10.0.10.3] sudo iptables -S FORWARD; sudo iptables -t nat -S POSTROUTING; sysctl net.ipv4.ip_forward
+-P FORWARD DROP
+-A FORWARD -i gw_vlan100 -o ens3 -j ACCEPT
+-A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+-A FORWARD -i gw_vlan200 -o ens3 -j ACCEPT
+-A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+-P POSTROUTING ACCEPT
+-A POSTROUTING -s 192.168.0.0/24 -o ens3 -j MASQUERADE
+-A POSTROUTING -s 192.168.2.0/24 -o ens3 -j MASQUERADE
+net.ipv4.ip_forward = 1
+
+>>> [10.0.10.1] sudo ovs-vsctl show
+44a77839-8a54-43e0-8ad6-4ccb8b9827e5
+    Bridge br-int
+        Port br-int
+            Interface br-int
+                type: internal
+        Port ens4
+            Interface ens4
+        Port ct100_ovs
+            tag: 100
+            Interface ct100_ovs
+        Port ct200_ovs
+            tag: 200
+            Interface ct200_ovs
+    ovs_version: "2.13.8"
+
+>>> [10.0.10.2] sudo ovs-vsctl show; pgrep -a qemu-system
+baa8600b-8220-4764-b51b-edaab6f6ac5d
+    Bridge br-int
+        Port br-int
+            Interface br-int
+                type: internal
+        Port ens4
+            Interface ens4
+        Port vm200_tap
+            tag: 200
+            Interface vm200_tap
+        Port vm100_tap
+            tag: 100
+            Interface vm100_tap
+    Bridge ovs1
+        Port ovs1
+            Interface ovs1
+                type: internal
+        Port ovs1-tap0
+            Interface ovs1-tap0
+                type: internal
+        Port ovs1-tap2
+            Interface ovs1-tap2
+        Port ovs1-tap1
+            Interface ovs1-tap1
+    ovs_version: "2.13.8"
+540159 qemu-system-x86_64 -enable-kvm -vnc 0.0.0.0:1 -netdev tap,id=net0,ifname=vm100_tap,script=no,downscript=no -device e1000,netdev=net0,mac=20:20:68:30:01:00 -serial unix:/tmp/vm100.serial,server,nowait -daemonize vm100.qcow2
+540264 qemu-system-x86_64 -enable-kvm -vnc 0.0.0.0:2 -netdev tap,id=net0,ifname=vm200_tap,script=no,downscript=no -device e1000,netdev=net0,mac=20:20:68:30:02:00 -serial unix:/tmp/vm200.serial,server,nowait -daemonize vm200.qcow2
+
+--- Sin DHCP ---
+
+>>> [10.0.10.3] pgrep -a dnsmasq || ip netns list | grep ns-dhcp
+[PASS] Server 3 sin dnsmasq ni namespaces DHCP: fail
+
+>>> [10.0.10.1:ct100] udhcpc -i eth0 -n -q -t 3 -T 1 -s /bin/true
+udhcpc: started, v1.37.0
+udhcpc: broadcasting discover
+udhcpc: broadcasting discover
+udhcpc: broadcasting discover
+udhcpc: no lease, failing
+[PASS] ct100 pide DHCP y nadie responde: fail
+
+>>> [10.0.10.1:ct100] ip -4 addr show eth0; ip route
+24: eth0@if25: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 1500 qdisc noqueue state UP qlen 1000
+    inet 192.168.0.10/24 scope global eth0
+       valid_lft forever preferred_lft forever
+default via 192.168.0.1 dev eth0 
+192.168.0.0/24 dev eth0 scope link  src 192.168.0.10 
+
+>>> [10.0.10.1:ct200] ip -4 addr show eth0; ip route
+26: eth0@if27: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 1500 qdisc noqueue state UP qlen 1000
+    inet 192.168.2.10/24 scope global eth0
+       valid_lft forever preferred_lft forever
+default via 192.168.2.1 dev eth0 
+192.168.2.0/24 dev eth0 scope link  src 192.168.2.10 
+
+--- VLAN 100 ---
+
+>>> [10.0.10.1:ct100] ping -c 2 -W 2 192.168.0.1
+PING 192.168.0.1 (192.168.0.1): 56 data bytes
+64 bytes from 192.168.0.1: seq=0 ttl=64 time=5.978 ms
+64 bytes from 192.168.0.1: seq=1 ttl=64 time=0.810 ms
+
+--- 192.168.0.1 ping statistics ---
+2 packets transmitted, 2 packets received, 0% packet loss
+round-trip min/avg/max = 0.810/3.394/5.978 ms
+[PASS] ct100 -> 192.168.0.1 (gateway VLAN 100): ok
+
+>>> [10.0.10.1:ct100] ping -c 2 -W 2 192.168.0.20
+PING 192.168.0.20 (192.168.0.20): 56 data bytes
+64 bytes from 192.168.0.20: seq=0 ttl=64 time=3.438 ms
+64 bytes from 192.168.0.20: seq=1 ttl=64 time=1.494 ms
+
+--- 192.168.0.20 ping statistics ---
+2 packets transmitted, 2 packets received, 0% packet loss
+round-trip min/avg/max = 1.494/2.466/3.438 ms
+[PASS] ct100 -> 192.168.0.20 (VM misma VLAN en Server 2 (pasa por OFS)): ok
+
+>>> [10.0.10.1:ct100] ping -c 2 -W 2 8.8.8.8
+PING 8.8.8.8 (8.8.8.8): 56 data bytes
+64 bytes from 8.8.8.8: seq=0 ttl=110 time=39.557 ms
+64 bytes from 8.8.8.8: seq=1 ttl=110 time=36.689 ms
+
+--- 8.8.8.8 ping statistics ---
+2 packets transmitted, 2 packets received, 0% packet loss
+round-trip min/avg/max = 36.689/38.123/39.557 ms
+[PASS] ct100 -> 8.8.8.8 (salida a Internet (NAT)): ok
+
+>>> [10.0.10.1:ct100] ping -c 2 -W 2 192.168.2.10
+PING 192.168.2.10 (192.168.2.10): 56 data bytes
+
+--- 192.168.2.10 ping statistics ---
+2 packets transmitted, 0 packets received, 100% packet loss
+[PASS] ct100 -> 192.168.2.10 (aislamiento: contenedor VLAN 200): fail
+
+>>> [10.0.10.1:ct100] ping -c 2 -W 2 192.168.2.20
+PING 192.168.2.20 (192.168.2.20): 56 data bytes
+
+--- 192.168.2.20 ping statistics ---
+2 packets transmitted, 0 packets received, 100% packet loss
+[PASS] ct100 -> 192.168.2.20 (aislamiento: VM VLAN 200): fail
+
+--- VLAN 200 ---
+
+>>> [10.0.10.1:ct200] ping -c 2 -W 2 192.168.2.1
+PING 192.168.2.1 (192.168.2.1): 56 data bytes
+64 bytes from 192.168.2.1: seq=0 ttl=64 time=5.441 ms
+64 bytes from 192.168.2.1: seq=1 ttl=64 time=0.769 ms
+
+--- 192.168.2.1 ping statistics ---
+2 packets transmitted, 2 packets received, 0% packet loss
+round-trip min/avg/max = 0.769/3.105/5.441 ms
+[PASS] ct200 -> 192.168.2.1 (gateway VLAN 200): ok
+
+>>> [10.0.10.1:ct200] ping -c 2 -W 2 192.168.2.20
+PING 192.168.2.20 (192.168.2.20): 56 data bytes
+64 bytes from 192.168.2.20: seq=0 ttl=64 time=7.937 ms
+64 bytes from 192.168.2.20: seq=1 ttl=64 time=1.471 ms
+
+--- 192.168.2.20 ping statistics ---
+2 packets transmitted, 2 packets received, 0% packet loss
+round-trip min/avg/max = 1.471/4.704/7.937 ms
+[PASS] ct200 -> 192.168.2.20 (VM misma VLAN en Server 2 (pasa por OFS)): ok
+
+>>> [10.0.10.1:ct200] ping -c 2 -W 2 8.8.8.8
+PING 8.8.8.8 (8.8.8.8): 56 data bytes
+64 bytes from 8.8.8.8: seq=0 ttl=110 time=39.250 ms
+64 bytes from 8.8.8.8: seq=1 ttl=110 time=35.458 ms
+
+--- 8.8.8.8 ping statistics ---
+2 packets transmitted, 2 packets received, 0% packet loss
+round-trip min/avg/max = 35.458/37.354/39.250 ms
+[PASS] ct200 -> 8.8.8.8 (salida a Internet (NAT)): ok
+
+>>> [10.0.10.1:ct200] ping -c 2 -W 2 192.168.0.10
+PING 192.168.0.10 (192.168.0.10): 56 data bytes
+
+--- 192.168.0.10 ping statistics ---
+2 packets transmitted, 0 packets received, 100% packet loss
+[PASS] ct200 -> 192.168.0.10 (aislamiento: contenedor VLAN 100): fail
+
+>>> [10.0.10.1:ct200] ping -c 2 -W 2 192.168.0.20
+PING 192.168.0.20 (192.168.0.20): 56 data bytes
+
+--- 192.168.0.20 ping statistics ---
+2 packets transmitted, 0 packets received, 100% packet loss
+[PASS] ct200 -> 192.168.0.20 (aislamiento: VM VLAN 100): fail
+
+========== RESUMEN: 12 PASS / 0 FAIL ==========
+Log guardado en: /home/ubuntu/TEL141_L4_20206830/act2_20260929_020335.log

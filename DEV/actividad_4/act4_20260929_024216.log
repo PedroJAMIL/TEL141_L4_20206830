@@ -1,0 +1,231 @@
+[OK] SSH passwordless + sudo NOPASSWD en server1, server2, server3.
+
+========== 7. VERIFICACIÓN ==========
+
+>>> [10.0.10.3] sudo ovs-vsctl show; ip -br addr show | grep gw_vlan; ip netns list; pgrep -a dnsmasq
+6f0eb54f-2ce9-4b85-8110-2a5df45533bc
+    Bridge br-int
+        Port gw_vlan100
+            tag: 100
+            Interface gw_vlan100
+                type: internal
+        Port dhcp_v200
+            tag: 200
+            Interface dhcp_v200
+                type: internal
+        Port ens4
+            Interface ens4
+        Port gw_vlan200
+            tag: 200
+            Interface gw_vlan200
+                type: internal
+        Port br-int
+            Interface br-int
+                type: internal
+    ovs_version: "2.13.8"
+gw_vlan100       UNKNOWN        192.168.0.1/24 fe80::580d:2bff:feef:b128/64 
+gw_vlan200       UNKNOWN        192.168.2.1/24 fe80::34c6:75ff:fe6c:5106/64 
+ns-dhcp-vlan200 (id: 0)
+135922 dnsmasq --conf-file=/dev/null --interface=dhcp_v200 --bind-interfaces --port=0 --pid-file=/run/dnsmasq-vlan200.pid --dhcp-leasefile=/var/lib/misc/dnsmasq-vlan200.leases --dhcp-range=192.168.2.10,192.168.2.50,255.255.255.0,12h --dhcp-option=3,192.168.2.1 --dhcp-option=6,8.8.8.8
+
+>>> [10.0.10.3] sudo iptables -S FORWARD; sudo iptables -t nat -S POSTROUTING; sysctl net.ipv4.ip_forward
+-P FORWARD DROP
+-A FORWARD -i gw_vlan100 -o gw_vlan200 -j ACCEPT
+-A FORWARD -i gw_vlan200 -o gw_vlan100 -j ACCEPT
+-P POSTROUTING ACCEPT
+net.ipv4.ip_forward = 1
+
+>>> [10.0.10.1] sudo ovs-vsctl show
+44a77839-8a54-43e0-8ad6-4ccb8b9827e5
+    Bridge br-int
+        Port ct100_ovs
+            tag: 100
+            Interface ct100_ovs
+        Port ens4
+            Interface ens4
+        Port ct200_ovs
+            tag: 200
+            Interface ct200_ovs
+        Port br-int
+            Interface br-int
+                type: internal
+    ovs_version: "2.13.8"
+
+>>> [10.0.10.2] sudo ovs-vsctl show; pgrep -a qemu-system
+baa8600b-8220-4764-b51b-edaab6f6ac5d
+    Bridge ovs1
+        Port ovs1
+            Interface ovs1
+                type: internal
+        Port ovs1-tap0
+            Interface ovs1-tap0
+                type: internal
+        Port ovs1-tap2
+            Interface ovs1-tap2
+        Port ovs1-tap1
+            Interface ovs1-tap1
+    Bridge br-int
+        Port br-int
+            Interface br-int
+                type: internal
+        Port vm200_tap
+            tag: 200
+            Interface vm200_tap
+        Port vm100_tap
+            tag: 100
+            Interface vm100_tap
+        Port ens4
+            Interface ens4
+    ovs_version: "2.13.8"
+542753 qemu-system-x86_64 -enable-kvm -vnc 0.0.0.0:1 -netdev tap,id=net0,ifname=vm100_tap,script=no,downscript=no -device e1000,netdev=net0,mac=20:20:68:30:01:00 -serial unix:/tmp/vm100.serial,server,nowait -daemonize vm100.qcow2
+542858 qemu-system-x86_64 -enable-kvm -vnc 0.0.0.0:2 -netdev tap,id=net0,ifname=vm200_tap,script=no,downscript=no -device e1000,netdev=net0,mac=20:20:68:30:02:00 -serial unix:/tmp/vm200.serial,server,nowait -daemonize vm200.qcow2
+
+--- DHCP solo en VLAN 200 ---
+
+>>> [10.0.10.3] pgrep -af '[d]nsmasq.*dhcp_v100'
+[PASS] Server 3 sin dnsmasq en VLAN 100: fail
+
+>>> [10.0.10.3] pgrep -af '[d]nsmasq.*dhcp_v200'
+135922 dnsmasq --conf-file=/dev/null --interface=dhcp_v200 --bind-interfaces --port=0 --pid-file=/run/dnsmasq-vlan200.pid --dhcp-leasefile=/var/lib/misc/dnsmasq-vlan200.leases --dhcp-range=192.168.2.10,192.168.2.50,255.255.255.0,12h --dhcp-option=3,192.168.2.1 --dhcp-option=6,8.8.8.8
+[PASS] Server 3 con dnsmasq en VLAN 200: ok
+
+Esperando 30 s a que vm200 obtenga IP por DHCP...
+
+>>> [10.0.10.3] sudo cat /var/lib/misc/dnsmasq-vlan200.leases
+1790692101 20:20:68:30:02:00 192.168.2.12 cirros 01:20:20:68:30:02:00
+1790692067 7a:20:60:56:1b:d0 192.168.2.15 * 01:7a:20:60:56:1b:d0
+
+IPs -> ct100=192.168.0.10 (estática)  vm100=192.168.0.20 (estática)  ct200=192.168.2.15 (DHCP)  vm200=192.168.2.12 (DHCP)
+
+--- Dentro de cada VLAN ---
+
+>>> [10.0.10.1:ct100] ping -c 2 -W 2 192.168.0.1
+PING 192.168.0.1 (192.168.0.1): 56 data bytes
+64 bytes from 192.168.0.1: seq=0 ttl=64 time=5.247 ms
+64 bytes from 192.168.0.1: seq=1 ttl=64 time=0.991 ms
+
+--- 192.168.0.1 ping statistics ---
+2 packets transmitted, 2 packets received, 0% packet loss
+round-trip min/avg/max = 0.991/3.119/5.247 ms
+[PASS] ct100 -> 192.168.0.1 (gateway VLAN 100): ok
+
+>>> [10.0.10.1:ct100] ping -c 2 -W 2 192.168.0.20
+PING 192.168.0.20 (192.168.0.20): 56 data bytes
+64 bytes from 192.168.0.20: seq=0 ttl=64 time=3.935 ms
+64 bytes from 192.168.0.20: seq=1 ttl=64 time=1.596 ms
+
+--- 192.168.0.20 ping statistics ---
+2 packets transmitted, 2 packets received, 0% packet loss
+round-trip min/avg/max = 1.596/2.765/3.935 ms
+[PASS] ct100 -> 192.168.0.20 (VM misma VLAN 100 en Server 2): ok
+
+>>> [10.0.10.1:ct200] ping -c 2 -W 2 192.168.2.1
+PING 192.168.2.1 (192.168.2.1): 56 data bytes
+64 bytes from 192.168.2.1: seq=0 ttl=64 time=4.399 ms
+64 bytes from 192.168.2.1: seq=1 ttl=64 time=0.683 ms
+
+--- 192.168.2.1 ping statistics ---
+2 packets transmitted, 2 packets received, 0% packet loss
+round-trip min/avg/max = 0.683/2.541/4.399 ms
+[PASS] ct200 -> 192.168.2.1 (gateway VLAN 200): ok
+
+>>> [10.0.10.1:ct200] ping -c 2 -W 2 192.168.2.12
+PING 192.168.2.12 (192.168.2.12): 56 data bytes
+64 bytes from 192.168.2.12: seq=0 ttl=64 time=4.311 ms
+64 bytes from 192.168.2.12: seq=1 ttl=64 time=1.359 ms
+
+--- 192.168.2.12 ping statistics ---
+2 packets transmitted, 2 packets received, 0% packet loss
+round-trip min/avg/max = 1.359/2.835/4.311 ms
+[PASS] ct200 -> 192.168.2.12 (VM misma VLAN 200 en Server 2): ok
+
+--- Ruteo entre VLANs (pasa por Server 3) ---
+
+>>> [10.0.10.1:ct100] ping -c 2 -W 2 192.168.2.15
+PING 192.168.2.15 (192.168.2.15): 56 data bytes
+64 bytes from 192.168.2.15: seq=0 ttl=63 time=1.172 ms
+64 bytes from 192.168.2.15: seq=1 ttl=63 time=1.193 ms
+
+--- 192.168.2.15 ping statistics ---
+2 packets transmitted, 2 packets received, 0% packet loss
+round-trip min/avg/max = 1.172/1.182/1.193 ms
+[PASS] ct100 -> 192.168.2.15 (VLAN 100 -> contenedor VLAN 200): ok
+
+>>> [10.0.10.1:ct100] ping -c 2 -W 2 192.168.2.12
+PING 192.168.2.12 (192.168.2.12): 56 data bytes
+64 bytes from 192.168.2.12: seq=0 ttl=63 time=4.826 ms
+64 bytes from 192.168.2.12: seq=1 ttl=63 time=2.112 ms
+
+--- 192.168.2.12 ping statistics ---
+2 packets transmitted, 2 packets received, 0% packet loss
+round-trip min/avg/max = 2.112/3.469/4.826 ms
+[PASS] ct100 -> 192.168.2.12 (VLAN 100 -> VM VLAN 200): ok
+
+>>> [10.0.10.1:ct200] ping -c 2 -W 2 192.168.0.10
+PING 192.168.0.10 (192.168.0.10): 56 data bytes
+64 bytes from 192.168.0.10: seq=0 ttl=63 time=1.328 ms
+64 bytes from 192.168.0.10: seq=1 ttl=63 time=1.314 ms
+
+--- 192.168.0.10 ping statistics ---
+2 packets transmitted, 2 packets received, 0% packet loss
+round-trip min/avg/max = 1.314/1.321/1.328 ms
+[PASS] ct200 -> 192.168.0.10 (VLAN 200 -> contenedor VLAN 100): ok
+
+>>> [10.0.10.1:ct200] ping -c 2 -W 2 192.168.0.20
+PING 192.168.0.20 (192.168.0.20): 56 data bytes
+64 bytes from 192.168.0.20: seq=0 ttl=63 time=6.651 ms
+64 bytes from 192.168.0.20: seq=1 ttl=63 time=2.069 ms
+
+--- 192.168.0.20 ping statistics ---
+2 packets transmitted, 2 packets received, 0% packet loss
+round-trip min/avg/max = 2.069/4.360/6.651 ms
+[PASS] ct200 -> 192.168.0.20 (VLAN 200 -> VM VLAN 100): ok
+
+>>> [10.0.10.1:ct100] traceroute -n -m 3 -w 2 192.168.2.15
+traceroute to 192.168.2.15 (192.168.2.15), 3 hops max, 46 byte packets
+ 1  192.168.0.1  0.754 ms  1.277 ms  0.629 ms
+ 2  192.168.2.15  0.835 ms  0.754 ms  0.891 ms
+
+--- Sin salida a Internet ---
+
+>>> [10.0.10.1:ct100] ping -c 2 -W 2 8.8.8.8
+PING 8.8.8.8 (8.8.8.8): 56 data bytes
+
+--- 8.8.8.8 ping statistics ---
+2 packets transmitted, 0 packets received, 100% packet loss
+[PASS] ct100 -> 8.8.8.8 (SIN Internet desde VLAN 100): fail
+
+>>> [10.0.10.1:ct200] ping -c 2 -W 2 8.8.8.8
+PING 8.8.8.8 (8.8.8.8): 56 data bytes
+
+--- 8.8.8.8 ping statistics ---
+2 packets transmitted, 0 packets received, 100% packet loss
+[PASS] ct200 -> 8.8.8.8 (SIN Internet desde VLAN 200): fail
+
+--- Ciclo de vida: quitar y volver a poner el ruteo ---
+
+>>> [10.0.10.3] no_routing_networks.sh 100 200
+[DONE] Enrutamiento eliminado entre VLAN 100 y VLAN 200.
+
+>>> [10.0.10.1:ct100] ping -c 2 -W 2 192.168.2.15
+PING 192.168.2.15 (192.168.2.15): 56 data bytes
+
+--- 192.168.2.15 ping statistics ---
+2 packets transmitted, 0 packets received, 100% packet loss
+[PASS] ct100 -> 192.168.2.15 (sin ruteo: VLAN 100 -> VLAN 200 bloqueado): fail
+
+>>> [10.0.10.3] routing_networks.sh 100 200
+[DONE] Enrutamiento habilitado entre VLAN 100 y VLAN 200.
+
+>>> [10.0.10.1:ct100] ping -c 2 -W 2 192.168.2.15
+PING 192.168.2.15 (192.168.2.15): 56 data bytes
+64 bytes from 192.168.2.15: seq=0 ttl=63 time=5.495 ms
+64 bytes from 192.168.2.15: seq=1 ttl=63 time=1.387 ms
+
+--- 192.168.2.15 ping statistics ---
+2 packets transmitted, 2 packets received, 0% packet loss
+round-trip min/avg/max = 1.387/3.441/5.495 ms
+[PASS] ct100 -> 192.168.2.15 (ruteo restaurado: VLAN 100 -> VLAN 200): ok
+
+========== RESUMEN: 14 PASS / 0 FAIL ==========
+Log guardado en: /home/ubuntu/TEL141_L4_20206830/act4_20260929_024216.log

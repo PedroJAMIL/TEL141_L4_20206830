@@ -1,0 +1,29 @@
+[OK] SSH passwordless + sudo NOPASSWD en server1, server2, server3.
+
+========== LIMPIEZA ==========
+
+>>> [10.0.10.1] reset_node.sh worker
+[OK] VMs QEMU detenidas.
+[OK] dnsmasq de VLANs detenidos.
+[OK] br-int eliminado.
+[OK] veth veth_ovs eliminado.
+[OK] veth veth_ovs_200 eliminado.
+[DONE] reset_node.sh (worker) completado en server1.
+
+>>> [10.0.10.2] reset_node.sh worker
+[OK] VMs QEMU detenidas.
+[OK] dnsmasq de VLANs detenidos.
+[OK] netns ns-dhcp-server eliminado.
+[OK] br-int eliminado.
+[OK] veth veth_ovs_200 eliminado.
+[OK] TAP vm_vlan100_tap eliminada.
+[OK] TAP vm_vlan200_tap eliminada.
+[DONE] reset_node.sh (worker) completado en server2.
+
+>>> [10.0.10.3] reset_node.sh master
+[OK] VMs QEMU detenidas.
+[OK] dnsmasq de VLANs detenidos.
+[OK] netns ns-dhcp-vlan200 eliminado.
+[OK] br-int eliminado.
+[OK] Reglas iptables FORWARD/NAT limpiadas.
+[DONE] reset_node.sh (master) completado en server3.

@@ -44,5 +44,6 @@ sudo qemu-system-x86_64 -enable-kvm \
     -vnc "0.0.0.0:${DISPLAY_N}" \
     -netdev "tap,id=net0,ifname=${TAP},script=no,downscript=no" \
     -device "e1000,netdev=net0,mac=${MAC}" \
+    -serial "unix:/tmp/${VM_NAME}.serial,server,nowait" \
     -daemonize "$DISK"
 echo "[DONE] VM $VM_NAME lanzada (VNC :$DISPLAY_N, MAC $MAC)."

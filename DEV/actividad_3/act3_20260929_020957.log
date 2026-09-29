@@ -1,0 +1,305 @@
+[OK] SSH passwordless + sudo NOPASSWD en server1, server2, server3.
+
+========== LIMPIEZA ==========
+
+>>> [10.0.10.1] reset_node.sh worker
+[OK] Contenedores eliminados.
+[OK] br-int eliminado.
+[OK] veth ct200_ovs eliminado.
+[DONE] reset_node.sh (worker) completado en server1.
+
+>>> [10.0.10.2] reset_node.sh worker
+[OK] VMs QEMU detenidas.
+[OK] br-int eliminado.
+[OK] TAP vm100_tap eliminada.
+[OK] TAP vm200_tap eliminada.
+[DONE] reset_node.sh (worker) completado en server2.
+
+>>> [10.0.10.3] reset_node.sh master
+[OK] br-int eliminado.
+[OK] Reglas iptables FORWARD/NAT limpiadas.
+[DONE] reset_node.sh (master) completado en server3.
+
+========== 1. HEAD NODE (Server 3) ==========
+
+>>> [10.0.10.3] sudo ip link set ens4 up
+
+>>> [10.0.10.3] init_master.sh ens4
+[OK] Bridge br-int creado.
+[OK] Interfaz ens4 conectada a br-int.
+net.ipv4.ip_forward = 1
+[DONE] init_master.sh completado.
+
+========== 2. WORKERS (Server 1 y 2) ==========
+
+>>> [10.0.10.1] sudo ip link set ens4 up
+
+>>> [10.0.10.1] init_worker.sh ens4
+[OK] Bridge br-int creado.
+[OK] Interfaz ens4 conectada a br-int.
+[DONE] init_worker.sh completado.
+
+>>> [10.0.10.2] sudo ip link set ens4 up
+
+>>> [10.0.10.2] init_worker.sh ens4
+[OK] Bridge br-int creado.
+[OK] Interfaz ens4 conectada a br-int.
+[DONE] init_worker.sh completado.
+
+========== 3. REDES VLAN + DHCP (Server 3) ==========
+
+>>> [10.0.10.3] create_network_vlan.sh 100 192.168.0.0/24 yes 192.168.0.10,192.168.0.50
+[OK] Gateway VLAN 100: 192.168.0.1/24 en gw_vlan100
+[OK] DHCP en ns-dhcp-vlan100: servidor 192.168.0.2, rango 192.168.0.10-192.168.0.50, gw 192.168.0.1
+[DONE] create_network_vlan.sh completado.
+
+>>> [10.0.10.3] create_network_vlan.sh 200 192.168.2.0/24 yes 192.168.2.10,192.168.2.50
+[OK] Gateway VLAN 200: 192.168.2.1/24 en gw_vlan200
+[OK] DHCP en ns-dhcp-vlan200: servidor 192.168.2.2, rango 192.168.2.10-192.168.2.50, gw 192.168.2.1
+[DONE] create_network_vlan.sh completado.
+
+========== 4. CÓMPUTO ==========
+
+>>> [10.0.10.1] create_container.sh ct100 br-int 100
+[OK] Contenedor Docker ct100 creado (PID 165266).
+[OK] veth ct100_ovs (OVS, VLAN 100) <-> eth0 (ct100).
+udhcpc: started, v1.37.0
+udhcpc: broadcasting discover
+udhcpc: broadcasting discover
+udhcpc: broadcasting select for 192.168.0.40, server 192.168.0.2
+udhcpc: lease of 192.168.0.40 obtained from 192.168.0.2, lease time 43200
+mv: can't rename '/etc/resolv.conf.14': Resource busy
+[DONE] ct100 listo: eth0 = 192.168.0.40/24 (VLAN 100).
+
+>>> [10.0.10.1] create_container.sh ct200 br-int 200
+[OK] Contenedor Docker ct200 creado (PID 165485).
+[OK] veth ct200_ovs (OVS, VLAN 200) <-> eth0 (ct200).
+udhcpc: started, v1.37.0
+udhcpc: broadcasting discover
+udhcpc: broadcasting discover
+udhcpc: broadcasting select for 192.168.2.47, server 192.168.2.2
+udhcpc: lease of 192.168.2.47 obtained from 192.168.2.2, lease time 43200
+mv: can't rename '/etc/resolv.conf.15': Resource busy
+[DONE] ct200 listo: eth0 = 192.168.2.47/24 (VLAN 200).
+
+>>> [10.0.10.2] create_vm.sh vm100 br-int 100 5901
+Formatting 'vm100.qcow2', fmt=qcow2 size=117440512 backing_file=cirros-0.5.1-x86_64-disk.img backing_fmt=qcow2 cluster_size=65536 lazy_refcounts=off refcount_bits=16
+[OK] Disco vm100.qcow2 creado (backing: cirros-0.5.1-x86_64-disk.img).
+[OK] TAP vm100_tap conectada a br-int (VLAN 100).
+qemu-system-x86_64: warning: host doesn't support requested feature: CPUID.80000001H:ECX.svm [bit 2]
+[DONE] VM vm100 lanzada (VNC :1, MAC 20:20:68:30:01:00).
+
+>>> [10.0.10.2] create_vm.sh vm200 br-int 200 5902
+Formatting 'vm200.qcow2', fmt=qcow2 size=117440512 backing_file=cirros-0.5.1-x86_64-disk.img backing_fmt=qcow2 cluster_size=65536 lazy_refcounts=off refcount_bits=16
+[OK] Disco vm200.qcow2 creado (backing: cirros-0.5.1-x86_64-disk.img).
+[OK] TAP vm200_tap conectada a br-int (VLAN 200).
+qemu-system-x86_64: warning: host doesn't support requested feature: CPUID.80000001H:ECX.svm [bit 2]
+[DONE] VM vm200 lanzada (VNC :2, MAC 20:20:68:30:02:00).
+
+========== 5. VERIFICACIÓN ==========
+
+>>> [10.0.10.5] for b in $(sudo ovs-vsctl list-br); do sudo ovs-vsctl show; sudo ovs-ofctl dump-flows $b; done
+817a75af-8df8-436f-b176-e1751763b130
+    Bridge OFS
+        Port "ens6"
+            Interface "ens6"
+        Port "ens8"
+            Interface "ens8"
+        Port "ens4"
+            Interface "ens4"
+        Port "ens5"
+            Interface "ens5"
+        Port OFS
+            Interface OFS
+                type: internal
+        Port "ens7"
+            Interface "ens7"
+    ovs_version: "2.9.5"
+NXST_FLOW reply (xid=0x4):
+ cookie=0x0, duration=3656701.900s, table=0, n_packets=22899506, n_bytes=1517448331, idle_age=1, hard_age=65534, priority=0 actions=NORMAL
+
+>>> [10.0.10.3] sudo ovs-vsctl show; ip -br addr show | grep gw_vlan; ip netns list; pgrep -a dnsmasq
+6f0eb54f-2ce9-4b85-8110-2a5df45533bc
+    Bridge br-int
+        Port br-int
+            Interface br-int
+                type: internal
+        Port ens4
+            Interface ens4
+        Port dhcp_v200
+            tag: 200
+            Interface dhcp_v200
+                type: internal
+        Port gw_vlan200
+            tag: 200
+            Interface gw_vlan200
+                type: internal
+        Port dhcp_v100
+            tag: 100
+            Interface dhcp_v100
+                type: internal
+        Port gw_vlan100
+            tag: 100
+            Interface gw_vlan100
+                type: internal
+    ovs_version: "2.13.8"
+gw_vlan100       UNKNOWN        192.168.0.1/24 fe80::80e8:66ff:febc:f59b/64 
+gw_vlan200       UNKNOWN        192.168.2.1/24 fe80::8894:eeff:fe57:a1c8/64 
+ns-dhcp-vlan200 (id: 1)
+ns-dhcp-vlan100 (id: 0)
+133978 dnsmasq --conf-file=/dev/null --interface=dhcp_v100 --bind-interfaces --port=0 --pid-file=/run/dnsmasq-vlan100.pid --dhcp-leasefile=/var/lib/misc/dnsmasq-vlan100.leases --dhcp-range=192.168.0.10,192.168.0.50,255.255.255.0,12h --dhcp-option=3,192.168.0.1 --dhcp-option=6,8.8.8.8
+134196 dnsmasq --conf-file=/dev/null --interface=dhcp_v200 --bind-interfaces --port=0 --pid-file=/run/dnsmasq-vlan200.pid --dhcp-leasefile=/var/lib/misc/dnsmasq-vlan200.leases --dhcp-range=192.168.2.10,192.168.2.50,255.255.255.0,12h --dhcp-option=3,192.168.2.1 --dhcp-option=6,8.8.8.8
+
+>>> [10.0.10.3] sudo iptables -S FORWARD; sudo iptables -t nat -S POSTROUTING; sysctl net.ipv4.ip_forward
+-P FORWARD DROP
+-P POSTROUTING ACCEPT
+net.ipv4.ip_forward = 1
+
+>>> [10.0.10.1] sudo ovs-vsctl show
+44a77839-8a54-43e0-8ad6-4ccb8b9827e5
+    Bridge br-int
+        Port ct100_ovs
+            tag: 100
+            Interface ct100_ovs
+        Port ens4
+            Interface ens4
+        Port br-int
+            Interface br-int
+                type: internal
+        Port ct200_ovs
+            tag: 200
+            Interface ct200_ovs
+    ovs_version: "2.13.8"
+
+>>> [10.0.10.2] sudo ovs-vsctl show; pgrep -a qemu-system
+baa8600b-8220-4764-b51b-edaab6f6ac5d
+    Bridge ovs1
+        Port ovs1
+            Interface ovs1
+                type: internal
+        Port ovs1-tap0
+            Interface ovs1-tap0
+                type: internal
+        Port ovs1-tap2
+            Interface ovs1-tap2
+        Port ovs1-tap1
+            Interface ovs1-tap1
+    Bridge br-int
+        Port br-int
+            Interface br-int
+                type: internal
+        Port vm100_tap
+            tag: 100
+            Interface vm100_tap
+        Port vm200_tap
+            tag: 200
+            Interface vm200_tap
+        Port ens4
+            Interface ens4
+    ovs_version: "2.13.8"
+541687 qemu-system-x86_64 -enable-kvm -vnc 0.0.0.0:1 -netdev tap,id=net0,ifname=vm100_tap,script=no,downscript=no -device e1000,netdev=net0,mac=20:20:68:30:01:00 -serial unix:/tmp/vm100.serial,server,nowait -daemonize vm100.qcow2
+541793 qemu-system-x86_64 -enable-kvm -vnc 0.0.0.0:2 -netdev tap,id=net0,ifname=vm200_tap,script=no,downscript=no -device e1000,netdev=net0,mac=20:20:68:30:02:00 -serial unix:/tmp/vm200.serial,server,nowait -daemonize vm200.qcow2
+
+Esperando 45 s a que las VMs cirros arranquen y pidan IP por DHCP...
+
+>>> [10.0.10.3] sudo cat /var/lib/misc/dnsmasq-vlan100.leases /var/lib/misc/dnsmasq-vlan200.leases
+1790691051 20:20:68:30:01:00 192.168.0.13 cirros 01:20:20:68:30:01:00
+1790691015 e2:0a:c1:b4:52:c1 192.168.0.40 * 01:e2:0a:c1:b4:52:c1
+1790691053 20:20:68:30:02:00 192.168.2.12 cirros 01:20:20:68:30:02:00
+1790691019 3e:e5:15:56:71:76 192.168.2.47 * 01:3e:e5:15:56:71:76
+
+IPs por DHCP -> ct100=192.168.0.40  ct200=192.168.2.47  vm100=192.168.0.13  vm200=192.168.2.12
+
+--- Sin NAT en Server 3 ---
+
+>>> [10.0.10.3] sudo iptables -t nat -S POSTROUTING | grep MASQUERADE
+[PASS] Server 3 sin reglas MASQUERADE: fail
+
+--- VLAN 100 ---
+
+>>> [10.0.10.1:ct100] ping -c 2 -W 2 192.168.0.1
+PING 192.168.0.1 (192.168.0.1): 56 data bytes
+64 bytes from 192.168.0.1: seq=0 ttl=64 time=7.573 ms
+64 bytes from 192.168.0.1: seq=1 ttl=64 time=0.865 ms
+
+--- 192.168.0.1 ping statistics ---
+2 packets transmitted, 2 packets received, 0% packet loss
+round-trip min/avg/max = 0.865/4.219/7.573 ms
+[PASS] ct100 -> 192.168.0.1 (gateway VLAN 100): ok
+
+>>> [10.0.10.1:ct100] ping -c 2 -W 2 192.168.0.13
+PING 192.168.0.13 (192.168.0.13): 56 data bytes
+64 bytes from 192.168.0.13: seq=0 ttl=64 time=5.664 ms
+64 bytes from 192.168.0.13: seq=1 ttl=64 time=1.371 ms
+
+--- 192.168.0.13 ping statistics ---
+2 packets transmitted, 2 packets received, 0% packet loss
+round-trip min/avg/max = 1.371/3.517/5.664 ms
+[PASS] ct100 -> 192.168.0.13 (VM misma VLAN en Server 2 (pasa por OFS)): ok
+
+>>> [10.0.10.1:ct100] ping -c 2 -W 2 8.8.8.8
+PING 8.8.8.8 (8.8.8.8): 56 data bytes
+
+--- 8.8.8.8 ping statistics ---
+2 packets transmitted, 0 packets received, 100% packet loss
+[PASS] ct100 -> 8.8.8.8 (SIN salida a Internet): fail
+
+>>> [10.0.10.1:ct100] ping -c 2 -W 2 192.168.2.47
+PING 192.168.2.47 (192.168.2.47): 56 data bytes
+
+--- 192.168.2.47 ping statistics ---
+2 packets transmitted, 0 packets received, 100% packet loss
+[PASS] ct100 -> 192.168.2.47 (aislamiento: contenedor VLAN 200): fail
+
+>>> [10.0.10.1:ct100] ping -c 2 -W 2 192.168.2.12
+PING 192.168.2.12 (192.168.2.12): 56 data bytes
+
+--- 192.168.2.12 ping statistics ---
+2 packets transmitted, 0 packets received, 100% packet loss
+[PASS] ct100 -> 192.168.2.12 (aislamiento: VM VLAN 200): fail
+
+--- VLAN 200 ---
+
+>>> [10.0.10.1:ct200] ping -c 2 -W 2 192.168.2.1
+PING 192.168.2.1 (192.168.2.1): 56 data bytes
+64 bytes from 192.168.2.1: seq=0 ttl=64 time=8.404 ms
+64 bytes from 192.168.2.1: seq=1 ttl=64 time=0.761 ms
+
+--- 192.168.2.1 ping statistics ---
+2 packets transmitted, 2 packets received, 0% packet loss
+round-trip min/avg/max = 0.761/4.582/8.404 ms
+[PASS] ct200 -> 192.168.2.1 (gateway VLAN 200): ok
+
+>>> [10.0.10.1:ct200] ping -c 2 -W 2 192.168.2.12
+PING 192.168.2.12 (192.168.2.12): 56 data bytes
+64 bytes from 192.168.2.12: seq=0 ttl=64 time=8.174 ms
+64 bytes from 192.168.2.12: seq=1 ttl=64 time=1.176 ms
+
+--- 192.168.2.12 ping statistics ---
+2 packets transmitted, 2 packets received, 0% packet loss
+round-trip min/avg/max = 1.176/4.675/8.174 ms
+[PASS] ct200 -> 192.168.2.12 (VM misma VLAN en Server 2 (pasa por OFS)): ok
+
+>>> [10.0.10.1:ct200] ping -c 2 -W 2 8.8.8.8
+PING 8.8.8.8 (8.8.8.8): 56 data bytes
+
+--- 8.8.8.8 ping statistics ---
+2 packets transmitted, 0 packets received, 100% packet loss
+[PASS] ct200 -> 8.8.8.8 (SIN salida a Internet): fail
+
+>>> [10.0.10.1:ct200] ping -c 2 -W 2 192.168.0.40
+PING 192.168.0.40 (192.168.0.40): 56 data bytes
+
+--- 192.168.0.40 ping statistics ---
+2 packets transmitted, 0 packets received, 100% packet loss
+[PASS] ct200 -> 192.168.0.40 (aislamiento: contenedor VLAN 100): fail
+
+>>> [10.0.10.1:ct200] ping -c 2 -W 2 192.168.0.13
+PING 192.168.0.13 (192.168.0.13): 56 data bytes
+
+--- 192.168.0.13 ping statistics ---
+2 packets transmitted, 0 packets received, 100% packet loss
+[PASS] ct200 -> 192.168.0.13 (aislamiento: VM VLAN 100): fail
+
+========== RESUMEN: 11 PASS / 0 FAIL ==========
+Log guardado en: /home/ubuntu/TEL141_L4_20206830/act3_20260929_020957.log
